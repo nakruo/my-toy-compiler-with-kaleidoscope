@@ -158,9 +158,60 @@ static std::unique_ptr<ExprAST> ParseParenExpr()
 {
     getNextTOken();
     auto V = ParseExpression();
+    if (!V) 
+        nullptr;
+    
+    if (CurTok != ')')
+        return LogError("excepted ')'");
+    getNextTOken();
+    
+    return V;
 }
 
+static std::unique_ptr<ExprAST> ParseIdentifierExpr()
+{
+    std::string IdName = IdentifierStr;
+    getNextTOken();
 
+    if (CurTok != '(') return std::make_unique<VariableExprAST>(IdName);
+
+    getNextTOken(); 
+    std::vector<std::unique_ptr<ExprAST>> Args;
+    if (CurTok != ')' )
+    {
+        while(true) 
+        {
+            if (auto Arg = ParseExpression())
+                Args.push_back(std::move(Arg));
+            else    
+                return nullptr;
+            
+            if (CurTok == ')') break;
+            
+            if (CurTok != ',')
+                return LogError("Expected ')' or ',' in argument list");
+            getNextTOken();
+
+        }
+    }
+    getNextTOken();
+    return std::make_unique<CallExprAST>(IdName, std::move(Args));
+}
+
+static std::unique_ptr<ExprAST> ParsePrimary() 
+{
+    switch (CurTok)
+    {
+    default:
+        return LogError("Unknown token when expecting an expression");
+    case tok_identifier:
+        return ParseIdentifierExpr();
+    case tok_number:
+        return ParseNumberEXpr();
+    case '(':
+        return ParseParenExpr();
+    }
+}
 
 int main()
 {
