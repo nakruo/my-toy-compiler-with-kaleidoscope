@@ -1,6 +1,7 @@
 #include <iostream>
 #include <memory>
 #include <vector>
+#include <map>
 
 
 enum Token 
@@ -213,7 +214,70 @@ static std::unique_ptr<ExprAST> ParsePrimary()
     }
 }
 
+static std::map<char, int> BinopPrecedence;
+
+static int GetTokPrecedence() 
+{
+    if (!isascii(CurTok))
+        return -1;
+
+    int TokPrec = BinopPrecedence[CurTok];
+    
+    if (TokPrec <= 0) 
+        return -1;
+    return TokPrec;
+}
+
+static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec, std::unique_ptr<ExprAST> LHS)
+{
+    while (true) 
+    {
+        int TokPrec = GetTokPrecedence();
+
+        if(TokPrec < ExprPrec)
+            return LHS;
+        
+        int BinOp = CurTok;
+        getNextTOken();
+
+        auto RHS = ParsePrimary();
+        if (!RHS) return nullptr;
+
+        int NextPrec = GetTokPrecedence();
+        if (TokPrec < NextPrec)
+        {
+            RHS = ParseBinOpRHS(TokPrec + 1, std::move(RHS));
+            if (!RHS) return nullptr;
+        }
+
+
+        LHS = std::make_unique<BinaryExprAST>(BinOp, std::move(LHS), std::move(RHS));
+    }
+
+    
+}
+
+static std::unique_ptr<ExprAST> ParseExpression() 
+{
+    auto LHS = ParsePrimary();
+    if (!LHS) return nullptr;
+    return ParseBinOpRHS(0, std::move(LHS));
+}
+
+
+
+
+
+
 int main()
 {
+    BinopPrecedence['<'] = 10;
+    BinopPrecedence['+'] = 20;
+    BinopPrecedence['-'] = 20;
+    BinopPrecedence['*'] = 40;
+    BinopPrecedence['/'] = 40; // this 
+    BinopPrecedence['%'] = 40; // and that. i added them myself
+
+
     return 0;
 }
