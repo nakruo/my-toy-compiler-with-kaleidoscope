@@ -314,6 +314,57 @@ static std::unique_ptr<FunctionAST> ParseTopLevelExpr()
     return nullptr;
 }
 
+static void HandleDefinition()
+{
+    if (ParseDefinition())
+    {
+        fprintf(stderr, "Parsed a function definition.\n");
+    } 
+    else getNextTOken();
+
+}
+static void HandleExtern()
+{
+    if (ParseExtern())
+    {
+        fprintf(stderr, "Parsed and extern\n");
+    }
+    else getNextTOken();
+}
+static void HandleTopLevelExpression()
+{
+    if (ParseTopLevelExpr())
+    {
+        fprintf(stderr, "Parsed a toplevel exp\n");
+    }
+    else getNextTOken();
+}
+
+static void MainLoop()
+{
+    while (true) 
+    {
+        fprintf(stderr, "ready> ");
+        switch (CurTok)
+        {
+            case tok_eof:
+                return;
+            case ';':
+                getNextTOken();
+                break;
+            case tok_def:
+                HandleDefinition();
+                break;
+            case tok_extern:
+                HandleExtern();
+                break;
+            default:
+                HandleTopLevelExpression();
+                break;   
+        }
+    }
+}
+
 
 
 
@@ -326,6 +377,10 @@ int main()
     BinopPrecedence['/'] = 40; // this 
     BinopPrecedence['%'] = 40; // and that. i added them myself
 
+    fprintf(stderr, "ready> ");
+    getNextTOken();
+
+    MainLoop();
 
     return 0;
 }
