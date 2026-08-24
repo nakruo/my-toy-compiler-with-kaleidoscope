@@ -264,7 +264,55 @@ static std::unique_ptr<ExprAST> ParseExpression()
     return ParseBinOpRHS(0, std::move(LHS));
 }
 
+static std::unique_ptr<PrototypeAST> ParsePrototype()
+{
+    if (CurTok != tok_identifier)
+        return LogErrorP("Expected function name in prototype");
 
+    std::string FnName = IdentifierStr;
+    getNextTOken();
+
+    if (CurTok != '(')
+        return LogErrorP("Expected '(' in prototoype");
+    
+    std::vector<std::string> ArgNames;
+    while (getNextTOken() == tok_identifier) 
+        ArgNames.push_back(IdentifierStr);
+        
+    if ( CurTok != ')')
+        return LogErrorP("Expected ')' in prototoype");
+    
+    getNextTOken();
+    return std::make_unique<PrototypeAST>(FnName, std::move(ArgNames));
+}
+
+static std::unique_ptr<FunctionAST> ParseDefinition()
+{
+    getNextTOken();
+    auto Proto = ParsePrototype();
+
+    if (!Proto) return nullptr;
+    
+    if (auto e = ParseExpression())
+        return std::make_unique<FunctionAST>(std::move(Proto), std::move(e));
+    return nullptr;
+}
+
+static std::unique_ptr<PrototypeAST> ParseExtern()
+{
+    getNextTOken();
+    return ParsePrototype();
+}
+
+static std::unique_ptr<FunctionAST> ParseTopLevelExpr() 
+{
+    if (auto e = ParseExpression())
+    {
+        auto Proto = std::make_unique<PrototypeAST>("__anon_expr", std::vector<std::string>());
+        return std::make_unique<FunctionAST>(std::move(Proto), std::move(e));
+    }
+    return nullptr;
+}
 
 
 
