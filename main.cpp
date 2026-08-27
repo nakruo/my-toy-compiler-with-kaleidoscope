@@ -444,28 +444,61 @@ static std::unique_ptr<FunctionAST> ParseTopLevelExpr()
 
 static void HandleDefinition()
 {
-    if (ParseDefinition())
+    if (auto FnAST = ParseDefinition())
     {
-        fprintf(stderr, "Parsed a function definition.\n");
-    } 
-    else getNextTOken();
+        if (auto *FnIR = FnAST->codegen())
+        {
+            fprintf(stderr, "Read function definition;\n");
+            FnIR->print(errs());
+            fprintf(stderr, "\n");
+        }
+    }
+    else 
+    {
+        getNextTOken();
+    }
 
 }
 static void HandleExtern()
 {
-    if (ParseExtern())
+    if (auto ProtoAST = ParseExtern())
     {
-        fprintf(stderr, "Parsed and extern\n");
+        if (auto *FnIR = ProtoAST->codegen())
+        {
+            fprintf(stderr, "Read extern: \n");
+            FnIR->print(errs());
+            fprintf(stderr, "\n");
+        }
     }
-    else getNextTOken();
+    else
+    {
+        getNextTOken();
+    }
 }
 static void HandleTopLevelExpression()
 {
-    if (ParseTopLevelExpr())
+    if (auto FnAST = ParseTopLevelExpr()) 
     {
-        fprintf(stderr, "Parsed a toplevel exp\n");
+      if (auto *FnIR = FnAST->codegen()) 
+      {
+        fprintf(stderr, "Read top-level expression:\n");
+        FnIR->print(errs());
+        fprintf(stderr, "\n");
+
+        FnIR->eraseFromParent(); //The next anonymous operation does not return an error
+      }
     }
-    else getNextTOken();
+    else
+    {
+        getNextTOken();
+    }
+}
+
+static void InitializeModule()
+{
+    TheContext = std::make_unique<LLVMContext>();
+    TheModule = std::make_unique<Module>("my first module", *TheContext);
+    Builder = std::make_unique<IRBuilder<>>(*TheContext);
 }
 
 static void MainLoop()
@@ -508,7 +541,11 @@ int main()
     fprintf(stderr, "ready> ");
     getNextTOken();
 
+    InitializeModule();
+
     MainLoop();
+
+    TheModule->print(errs(), nullptr);
 
     return 0;
 }
