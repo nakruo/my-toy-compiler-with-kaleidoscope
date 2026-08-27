@@ -132,6 +132,7 @@ public:
         :Name(Name), Args(std::move(Args)) {}
 
     const std::string &getName() const { return Name; }
+    Function *codegen();
 
 };
 
@@ -143,6 +144,7 @@ class FunctionAST
 public: 
     FunctionAST(std::unique_ptr<PrototypeAST> Proto, std::unique_ptr<ExprAST> Body)
         : Proto(std::move(Proto)), Body(std::move(Body)) {}
+    Function *codegen();
 };
 
 static int CurTok;
@@ -220,6 +222,51 @@ Value *CallExprAST::codegen()
     }
 
     return Builder->CreateCall(CalleeF, ArgsV, "calltmp");
+}
+
+Function *PrototypeAST::codegen()
+{
+    std::vector<Type*> Doubles(Args.size(), Type::getDoubleTy(*TheContext));
+
+    FunctionType *FT = FunctionType::get(Type::getDoubleTy(*TheContext), Doubles, false);
+    Function *F = Function::Create(FT, Function::ExternalLinkage, Name, TheModule.get());
+
+    unsigned Idx = 0;
+    for (auto &Arg : F->args())
+        Arg.setName(Args[Idx++]);
+    return F;
+
+}
+
+Function *FunctionAST::codegen()
+{
+    Function *TheFunction = TheModule->getFunction(Proto->getName());
+    if (!TheFunction) {
+        TheFunction = Proto->codegen();
+        if (!TheFunction) {
+            return nullptr; 
+        }
+    }
+
+    if (!TheFunction->empty())
+        return (Function*)LogErrorV("Function cannot be redefined.");
+
+    BasicBlock *BB = BasicBlock::Create(*TheContext, "entry", TheFunction);
+    Builder->SetInsertPoint(BB);
+
+    NamedValues.clear();
+    for (auto &Arg : TheFunction->args())
+        NamedValues[std::string(Arg.getName())] = &Arg;
+    
+    if (Value *RetVal = Body->codegen())
+    {
+        Builder->CreateRet(RetVal);
+        verifyFunction(*TheFunction);
+        return TheFunction;
+    }
+
+    TheFunction->eraseFromParent();
+    return nullptr;
 }
 
 static int getNextTOken() 
