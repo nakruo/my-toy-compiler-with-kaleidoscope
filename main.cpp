@@ -152,16 +152,6 @@ static std::unique_ptr<IRBuilder<>> Builder;
 static std::unique_ptr<Module> TheModule;
 static std::map<std::string, Value *> NamedValues;
 
-Value *LogErrorV(const char *Str) {
-  LogError(Str);
-  return nullptr;
-}
-
-static int getNextTOken() 
-{
-    return CurTok = gettok();
-}
-
 std::unique_ptr<ExprAST> LogError(const char *Str)
 {
     fprintf(stderr, "Error: %s\n", Str);
@@ -172,6 +162,69 @@ std::unique_ptr<PrototypeAST> LogErrorP(const char *Str)
 {
     LogError(Str);
     return nullptr;
+}
+
+Value *LogErrorV(const char *Str) {
+  LogError(Str);
+  return nullptr;
+}
+
+Value *NumberExprAST::codegen()
+{
+    return ConstantFP::get(*TheContext, APFloat(Val));
+}
+
+Value *VariableExprAST::codegen()
+{
+    Value *V = NamedValues[Name];
+    if (!V) LogErrorV("Unknown variable name");
+    return V;
+}
+
+Value *BinaryExprAST::codegen()
+{
+    Value *L = LHS->codegen();
+    Value *R = RHS->codegen();
+    if (!L || !R) return nullptr;
+
+    switch (OP)
+    {
+        case '+':
+            return Builder->CreateFAdd(L, R, "addtmp");
+        case '-':
+            return Builder->CreateFSub(L, R, "subtmp");
+        case '*':
+            return Builder->CreateFMul(L, R, "multmp");
+        case '<':
+            L = Builder->CreateFCmpULT(L, R, "cmptmp");
+            return Builder->CreateUIToFP(L, Type::getDoubleTy(*TheContext), "booltmp");
+        default:
+            return LogErrorV("invalid binary operator");
+    }
+}
+
+Value *CallExprAST::codegen()
+{
+    Function *CalleeF = TheModule->getFunction(Callee);
+    if (!CalleeF)
+        return LogErrorV("Unknown funcition referenced");
+    if (CalleeF->arg_size() != Args.size())
+        return LogErrorV("Incorrect # arguments passed");
+    
+    std::vector<Value *> ArgsV;
+    for (unsigned i = 0, e = Args.size(); i != e; ++i)
+    {
+        ArgsV.push_back(Args[i]->codegen());
+        if (ArgsV.back())
+            return nullptr;
+    }
+
+    return Builder->CreateCall(CalleeF, ArgsV, "calltmp");
+}
+
+static int getNextTOken() 
+{
+    return CurTok = gettok();
 }
 
 static std::unique_ptr<ExprAST> ParseNumberEXpr()
