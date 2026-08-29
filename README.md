@@ -3,19 +3,21 @@
 This is a personal project I'm working on to learn C++ and compiler design using the LLVM infrastructure. I'm following the official LLVM Kaleidoscope tutorial.
 
 ### Current Status
-Right now, the language doesn't do much. It only has:
-* A basic Lexer
-* A Recursive Descent Parser
+The compiler is currently capable of parsing code and generating optimized LLVM IR 
+Features include:
+* A basic Lexer and Recursive Descent Parser
 * An AST (Abstract Syntax Tree) builder
-* A simple REPL to test if the parsing works.
+* LLVM IR Code Generation (for functions, externs, and top-level expressions)
+* LLVM Optimization Passes (FunctionPassManager for constant folding, reassociation, and CFG simplification)
 
-Code generation (LLVM IR) is not implemented yet.
+*(Note: JIT compilation and execution are currently under development.)*
 
 ### How to build and run
-If you want to test the REPL:
+If you want to test the REPL and see the optimized LLVM IR output:
 
 ```bash
 cd build
+cmake ..
 make
 ./kaleidoscope
 ```
