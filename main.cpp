@@ -1,7 +1,15 @@
+#include "KaleidoscopeJIT.h"
 #include <iostream>
-#include <memory>
-#include <vector>
+#include <algorithm>
+#include <cassert>
+#include <cctype>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <map>
+#include <memory>
+#include <string>
+#include <vector>
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/BasicBlock.h"
@@ -11,11 +19,13 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/PassManager.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Verifier.h"
-#include "llvm/IR/PassManager.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/StandardInstrumentations.h"
+#include "llvm/Support/TargetSelect.h"
+#include "llvm/Target/TargetMachine.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/GVN.h"
@@ -25,6 +35,7 @@
 
 
 using namespace llvm;
+using namespace llvm::orc;
 
 enum Token 
 {
@@ -171,6 +182,8 @@ static std::unique_ptr<CGSCCAnalysisManager> TheCGAM;
 static std::unique_ptr<ModuleAnalysisManager> TheMAM;
 static std::unique_ptr<PassInstrumentationCallbacks> ThePIC;
 static std::unique_ptr<StandardInstrumentations> TheSI;
+
+static std::unique_ptr<KaleidoscopeJIT> TheJIT;
 
 std::unique_ptr<ExprAST> LogError(const char *Str)
 {
@@ -519,8 +532,7 @@ static void InitializeModuleAndManagers()
     TheModule = std::make_unique<Module>("my first JIT Module", *TheContext);
     Builder = std::make_unique<IRBuilder<>>(*TheContext);
 
-    //TheModule->setDataLayout(TheJIT->getDataLayout()); 
-    //TODO: Uncomment in chapter 4.4. (Currently commented out to prevent compiler errors since TheJIT is not initialized yet).
+    TheModule->setDataLayout(TheJIT->getDataLayout()); 
     TheFPM = std::make_unique<FunctionPassManager>();
     TheLAM = std::make_unique<LoopAnalysisManager>();
     TheFAM = std::make_unique<FunctionAnalysisManager>();
@@ -580,6 +592,19 @@ int main()
 
     fprintf(stderr, "ready> ");
     getNextTOken();
+
+    InitializeNativeTarget();
+    InitializeNativeTargetAsmPrinter();
+    InitializeNativeTargetAsmParser();
+    
+    auto JIT = KaleidoscopeJIT::Create();
+    if (!JIT) 
+    {
+        fprintf(stderr, "\nThe JIT engine could not be started\n\n");
+        exit(1);
+    }
+    TheJIT = std::move(*JIT);
+
 
     InitializeModuleAndManagers();
 
