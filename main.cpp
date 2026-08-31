@@ -174,6 +174,7 @@ static std::unique_ptr<LLVMContext> TheContext;
 static std::unique_ptr<IRBuilder<>> Builder;
 static std::unique_ptr<Module> TheModule;
 static std::map<std::string, Value *> NamedValues;
+static std::map<std::string, std::unique_ptr<PrototypeAST>> FunctionProtos;
 //optimization stuff 
 static std::unique_ptr<FunctionPassManager> TheFPM;
 static std::unique_ptr<LoopAnalysisManager> TheLAM;
@@ -238,9 +239,21 @@ Value *BinaryExprAST::codegen()
     }
 }
 
+Function *getFunction(std::string Name) 
+{
+    if (auto *F = TheModule->getFunction(Name))
+        return F;
+
+    auto FI = FunctionProtos.find(Name);
+    if (FI != FunctionProtos.end())
+        return FI->second->codegen();
+    
+    return nullptr;
+}
+
 Value *CallExprAST::codegen()
 {
-    Function *CalleeF = TheModule->getFunction(Callee);
+    Function *CalleeF = getFunction(Callee);
     if (!CalleeF)
         return LogErrorV("Unknown funcition referenced");
     if (CalleeF->arg_size() != Args.size())
@@ -250,7 +263,7 @@ Value *CallExprAST::codegen()
     for (unsigned i = 0, e = Args.size(); i != e; ++i)
     {
         ArgsV.push_back(Args[i]->codegen());
-        if (ArgsV.back())
+        if (!ArgsV.back())
             return nullptr;
     }
 
@@ -273,13 +286,11 @@ Function *PrototypeAST::codegen()
 
 Function *FunctionAST::codegen()
 {
-    Function *TheFunction = TheModule->getFunction(Proto->getName());
-    if (!TheFunction) {
-        TheFunction = Proto->codegen();
-        if (!TheFunction) {
-            return nullptr; 
-        }
-    }
+    auto &P = *Proto;
+    FunctionProtos[Proto->getName()] = std::move(Proto);
+    Function *TheFunction = getFunction(P.getName());
+    if (!TheFunction)
+        return nullptr;
 
     if (!TheFunction->empty())
         return (Function*)LogErrorV("Function cannot be redefined.");
@@ -485,6 +496,9 @@ static void HandleDefinition()
             fprintf(stderr, "Read function definition;\n");
             FnIR->print(errs());
             fprintf(stderr, "\n");
+
+            ExitOnErr(TheJIT->addModule(ThreadSafeModule(std::move(TheModule), std::move(TheContext))));
+            InitializeModuleAndManagers();
         }
     }
     else 
@@ -502,6 +516,8 @@ static void HandleExtern()
             fprintf(stderr, "Read extern: \n");
             FnIR->print(errs());
             fprintf(stderr, "\n");
+
+            FunctionProtos[ProtoAST->getName()] = std::move(ProtoAST);
         }
     }
     else
