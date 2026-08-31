@@ -184,6 +184,8 @@ static std::unique_ptr<PassInstrumentationCallbacks> ThePIC;
 static std::unique_ptr<StandardInstrumentations> TheSI;
 
 static std::unique_ptr<KaleidoscopeJIT> TheJIT;
+static ExitOnError ExitOnErr;
+static void InitializeModuleAndManagers();
 
 std::unique_ptr<ExprAST> LogError(const char *Str)
 {
@@ -511,13 +513,20 @@ static void HandleTopLevelExpression()
 {
     if (auto FnAST = ParseTopLevelExpr()) 
     {
-      if (auto *FnIR = FnAST->codegen()) 
+      if (FnAST->codegen()) 
       {
-        fprintf(stderr, "Read top-level expression:\n");
-        FnIR->print(errs());
-        fprintf(stderr, "\n");
+        auto RT = TheJIT->getMainJITDylib().createResourceTracker();
+        auto TSM = ThreadSafeModule(std::move(TheModule), std::move(TheContext));
+        ExitOnErr(TheJIT->addModule(std::move(TSM), RT));
 
-        FnIR->eraseFromParent(); //The next anonymous operation does not return an error
+        InitializeModuleAndManagers();
+
+        auto ExprSymbol = ExitOnErr(TheJIT->lookup("__anon_expr"));
+
+        double (*FP)() = ExprSymbol.getAddress().toPtr<double (*)()>();
+        fprintf(stderr, "Evaluated to %f\n", FP());
+
+        ExitOnErr(RT->remove());
       }
     }
     else
