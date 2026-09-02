@@ -267,7 +267,7 @@ Value *CallExprAST::codegen()
 {
     Function *CalleeF = getFunction(Callee);
     if (!CalleeF)
-        return LogErrorV("Unknown funcition referenced");
+        return LogErrorV("Unknown function referenced");
     if (CalleeF->arg_size() != Args.size())
         return LogErrorV("Incorrect # arguments passed");
     
@@ -348,7 +348,7 @@ static std::unique_ptr<ExprAST> ParseParenExpr()
         nullptr;
     
     if (CurTok != ')')
-        return LogError("excepted ')'");
+        return LogError("expected ')'");
     getNextTOken();
     
     return V;
@@ -458,14 +458,14 @@ static std::unique_ptr<PrototypeAST> ParsePrototype()
     getNextTOken();
 
     if (CurTok != '(')
-        return LogErrorP("Expected '(' in prototoype");
+        return LogErrorP("Expected '(' in prototype");
     
     std::vector<std::string> ArgNames;
     while (getNextTOken() == tok_identifier) 
         ArgNames.push_back(IdentifierStr);
         
     if ( CurTok != ')')
-        return LogErrorP("Expected ')' in prototoype");
+        return LogErrorP("Expected ')' in prototype");
     
     getNextTOken();
     return std::make_unique<PrototypeAST>(FnName, std::move(ArgNames));
