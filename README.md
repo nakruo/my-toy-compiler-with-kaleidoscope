@@ -9,8 +9,8 @@ Features include:
 * An AST (Abstract Syntax Tree) builder
 * LLVM IR Code Generation (for functions, externs, and top-level expressions)
 * LLVM Optimization Passes (FunctionPassManager for constant folding, reassociation, and CFG simplification)
-
-*(Note: JIT compilation and execution are currently under development.)*
+* JIT Compilation and Execution (via ORC JIT)
+* Persistent Memory and External Symbol Resolution (C++ stdlib linkage)
 
 ### How to build and run
 If you want to test the REPL and see the optimized LLVM IR output:
