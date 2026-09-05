@@ -58,7 +58,12 @@ enum Token
 
     tok_identifier = -4,
     tok_number = -5,
+
+    tok_if = -6,
+    tok_then = -7,
+    tok_else = -8,
 };
+
 static std::string IdentifierStr;
 static double NumVal;
 
@@ -76,6 +81,12 @@ static int gettok()
             return tok_def;
         if (IdentifierStr == "extern")
             return tok_extern;
+        if (IdentifierStr == "if")
+            return tok_if;
+        if (IdentifierStr == "then")
+            return tok_then;
+        if (IdentifierStr == "else")
+            return tok_else;
         return tok_identifier;
     
     }
@@ -152,6 +163,18 @@ class CallExprAST : public ExprAST
 public:
     CallExprAST(const std::string &Callee, std::vector<std::unique_ptr<ExprAST>> Args)
         :Callee(Callee), Args(std::move(Args)) {}
+    Value *codegen() override;
+};
+
+class IFExprAST : public ExprAST 
+{
+    std::unique_ptr<ExprAST> Cond, Then, Else;
+
+public:
+    IFExprAST(std::unique_ptr<ExprAST> Cond, std::unique_ptr<ExprAST> Then, std::unique_ptr<ExprAST> Else)
+        : Cond(std::move(Cond)), Then(std::move(Then)), Else(std::move(Else))
+        {}
+    
     Value *codegen() override;
 };
 
