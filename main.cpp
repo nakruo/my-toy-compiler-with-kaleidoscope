@@ -407,12 +407,42 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr()
     return std::make_unique<CallExprAST>(IdName, std::move(Args));
 }
 
+static std::unique_ptr<ExprAST> ParseIFExpr()
+{
+    getNextTOken();
+
+    auto Cond = ParseExpression();
+    if (!Cond)
+        return nullptr;
+    
+    if (CurTok != tok_then)
+        return LogError("expected then");
+    getNextTOken();
+
+    auto Then = ParseExpression();
+    if (!Then)
+        return nullptr;
+    
+    if (CurTok != tok_else)
+        return LogError("expected else");
+    getNextTOken();
+
+    auto Else = ParseExpression();
+    if (!Else)
+        return nullptr;
+
+    return std::make_unique<IFExprAST>(std::move(Cond), std::move(Then), std::move(Else));
+
+}
+
 static std::unique_ptr<ExprAST> ParsePrimary() 
 {
     switch (CurTok)
     {
     default:
         return LogError("Unknown token when expecting an expression");
+    case tok_if:
+        return ParseIFExpr();
     case tok_identifier:
         return ParseIdentifierExpr();
     case tok_number:
