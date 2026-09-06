@@ -11,6 +11,8 @@ Features include:
 * LLVM Optimization Passes (FunctionPassManager for constant folding, reassociation, and CFG simplification)
 * JIT Compilation and Execution (via ORC JIT)
 * Persistent Memory and External Symbol Resolution (C++ stdlib linkage)
+* Control Flow Support (if/then/else conditional expressions)
+* for loop iteration structures
 
 ### How to build and run
 If you want to test the REPL and see the optimized LLVM IR output:
