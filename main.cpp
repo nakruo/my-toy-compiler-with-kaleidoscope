@@ -210,6 +210,19 @@ public:
     Value *codegen() override;
 };
 
+class UnaryExprAST : public ExprAST 
+{
+    char Opcode;
+    std::unique_ptr<ExprAST> Operand;
+
+public:
+    UnaryExprAST(char Opcode, std::unique_ptr<ExprAST> Operand)
+        : Opcode(Opcode), Operand(std::move(Operand)) 
+    {}
+
+    Value *codegen() override;
+};
+
 class PrototypeAST
 {
     std::string Name;
@@ -502,6 +515,19 @@ Value *ForExprAST::codegen()
         return Constant::getNullValue(Type::getDoubleTy(*TheContext));
 }
 
+Value *UnaryExprAST::codegen() 
+{
+    Value *OperandV = Operand->codegen();
+    if (!OperandV)
+        return nullptr;
+
+    Function *F = getFunction(std::string("unary") + Opcode);
+    if (!F)
+        return LogErrorV("Unknown unary operator");
+    
+    return Builder->CreateCall(F, OperandV, "unop");
+}
+
 static int getNextTOken() 
 {
     return CurTok = gettok();
@@ -651,6 +677,18 @@ static std::unique_ptr<ExprAST> ParsePrimary()
     }
 }
 
+static std::unique_ptr<ExprAST> ParseUnary()
+{
+    if (!isascii(CurTok) || CurTok == '(' || CurTok == ',')
+        return ParsePrimary();
+
+    int Opc = CurTok;
+    getNextTOken();
+    if (auto Operand = ParseUnary())
+        return std::make_unique<UnaryExprAST>(Opc, std::move(Operand));
+    return nullptr;
+}
+
 static int GetTokPrecedence() 
 {
     if (!isascii(CurTok))
@@ -675,7 +713,7 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec, std::unique_ptr<Expr
         int BinOp = CurTok;
         getNextTOken();
 
-        auto RHS = ParsePrimary();
+        auto RHS = ParseUnary();
         if (!RHS) return nullptr;
 
         int NextPrec = GetTokPrecedence();
@@ -694,7 +732,7 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec, std::unique_ptr<Expr
 
 static std::unique_ptr<ExprAST> ParseExpression() 
 {
-    auto LHS = ParsePrimary();
+    auto LHS = ParseUnary();
     if (!LHS) return nullptr;
     return ParseBinOpRHS(0, std::move(LHS));
 }
@@ -713,6 +751,15 @@ static std::unique_ptr<PrototypeAST> ParsePrototype()
     case tok_identifier:
         FnName = IdentifierStr;
         Kind = 0;
+        getNextTOken();
+        break;
+    case tok_unary:
+        getNextTOken();
+        if (!isascii(CurTok))
+            return  LogErrorP("Expected unary operator");
+        FnName = "unary";
+        FnName += (char)CurTok;
+        Kind = 1;
         getNextTOken();
         break;
     case tok_binary:
