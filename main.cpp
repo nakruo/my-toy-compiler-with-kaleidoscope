@@ -31,6 +31,7 @@
 #include "llvm/Transforms/Scalar/GVN.h"
 #include "llvm/Transforms/Scalar/Reassociate.h"
 #include "llvm/Transforms/Scalar/SimplifyCFG.h"
+#include "llvm/Transforms/Utils/Mem2Reg.h"
 
 #ifdef _WIN32
 #define DLLEXPORT __declspec(dllexport)
@@ -267,7 +268,7 @@ static std::map<char, int> BinopPrecedence;
 static std::unique_ptr<LLVMContext> TheContext;
 static std::unique_ptr<IRBuilder<>> Builder;
 static std::unique_ptr<Module> TheModule;
-static std::map<std::string, Value *> NamedValues;
+static std::map<std::string, AllocaInst*> NamedValues;
 static std::map<std::string, std::unique_ptr<PrototypeAST>> FunctionProtos;
 //optimization stuff 
 static std::unique_ptr<FunctionPassManager> TheFPM;
@@ -299,6 +300,12 @@ Value *LogErrorV(const char *Str) {
   return nullptr;
 }
 
+static AllocaInst *CreateEntryBlockAlloca(Function *TheFunction, StringRef VarName)
+{
+    IRBuilder<> TmpB(&TheFunction->getEntryBlock(), TheFunction->getEntryBlock().begin());
+    return TmpB.CreateAlloca(Type::getDoubleTy(*TheContext), nullptr, VarName);
+}
+
 Function *getFunction(std::string Name) 
 {
     if (auto *F = TheModule->getFunction(Name))
@@ -318,9 +325,9 @@ Value *NumberExprAST::codegen()
 
 Value *VariableExprAST::codegen()
 {
-    Value *V = NamedValues[Name];
-    if (!V) LogErrorV("Unknown variable name");
-    return V;
+    AllocaInst *A = NamedValues[Name];
+    if (!A) LogErrorV("Unknown variable name");
+    return Builder->CreateLoad(A->getAllocatedType(), A, Name.c_str());
 }
 
 Value *BinaryExprAST::codegen()
@@ -404,8 +411,12 @@ Function *FunctionAST::codegen()
 
     NamedValues.clear();
     for (auto &Arg : TheFunction->args())
-        NamedValues[std::string(Arg.getName())] = &Arg;
-    
+    {
+        AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, Arg.getName());
+        Builder->CreateStore(&Arg, Alloca);
+        NamedValues[std::string(Arg.getName())] = Alloca;
+    }
+
     if (Value *RetVal = Body->codegen())
     {
         Builder->CreateRet(RetVal);
@@ -465,17 +476,15 @@ Value *ForExprAST::codegen()
     if (!StartVal)  return nullptr;
 
     Function *TheFunction = Builder->GetInsertBlock()->getParent();
-    BasicBlock *PreheaderBB = Builder->GetInsertBlock();
-    BasicBlock *LoopBB = BasicBlock::Create(*TheContext, "loop", TheFunction);
+    AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, VarName);
+    Builder->CreateStore(StartVal, Alloca);
 
+    BasicBlock *LoopBB = BasicBlock::Create(*TheContext, "loop", TheFunction);
     Builder->CreateBr(LoopBB);
     Builder->SetInsertPoint(LoopBB);
 
-    PHINode *Variable = Builder->CreatePHI(Type::getDoubleTy(*TheContext), 2, VarName);
-    Variable->addIncoming(StartVal, PreheaderBB);
-
-    Value *OldVal = NamedValues[VarName];
-    NamedValues[VarName] = Variable;
+    AllocaInst *OldVal = NamedValues[VarName];
+    NamedValues[VarName] = Alloca;
 
     if (!Body->codegen())
         return nullptr;
@@ -493,7 +502,9 @@ Value *ForExprAST::codegen()
         StepVal = ConstantFP::get(*TheContext, APFloat(1.0));
     }
 
-    Value *NextVar = Builder->CreateFAdd(Variable, StepVal, "nextvar");
+    Value *CurVar = Builder->CreateLoad(Alloca->getAllocatedType(), Alloca, VarName.c_str());
+    Value *NextVar = Builder->CreateFAdd(CurVar, StepVal, "nextvar");
+    Builder->CreateStore(NextVar, Alloca);
 
     Value *EndCond = End->codegen();
     if (!EndCond)
@@ -505,7 +516,6 @@ Value *ForExprAST::codegen()
     BasicBlock *AfterBB = BasicBlock::Create(*TheContext, "afterloop", TheFunction);
     Builder->CreateCondBr(EndCond, LoopBB, AfterBB);
     Builder->SetInsertPoint(AfterBB);
-    Variable->addIncoming(NextVar, LoopEndBB);
 
     if (OldVal)
         NamedValues[VarName] = OldVal;
@@ -902,9 +912,10 @@ static void InitializeModuleAndManagers()
     TheCGAM = std::make_unique<CGSCCAnalysisManager>();
     TheMAM = std::make_unique<ModuleAnalysisManager>();
     ThePIC = std::make_unique<PassInstrumentationCallbacks>();
-    TheSI = std::make_unique<StandardInstrumentations>(*TheContext, /*DebugLogging*/ true);
+    TheSI = std::make_unique<StandardInstrumentations>(*TheContext, true);
     TheSI->registerCallbacks(*ThePIC, TheMAM.get());
     
+    TheFPM->addPass(PromotePass());
     TheFPM->addPass(InstCombinePass());
     TheFPM->addPass(ReassociatePass());
     TheFPM->addPass(GVNPass());
