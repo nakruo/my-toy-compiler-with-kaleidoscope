@@ -160,6 +160,7 @@ class VariableExprAST : public ExprAST
 
 public:
     VariableExprAST(const std::string &Name) : Name(Name) {}
+    const std::string &getName() const {return Name;}
     Value *codegen() override;
 };
 
@@ -332,6 +333,22 @@ Value *VariableExprAST::codegen()
 
 Value *BinaryExprAST::codegen()
 {
+    if (OP == '=')
+    {
+        VariableExprAST *LHSE = static_cast<VariableExprAST*>(LHS.get());
+        if (!LHSE)
+            return LogErrorV("destination of '=' must be a variable");
+        
+        Value *Val = RHS->codegen();
+        if (!Val)   return nullptr;
+
+        AllocaInst *Variable = NamedValues[LHSE->getName()];
+        if (!Variable)
+            return LogErrorV("Unknown variable name");
+        Builder->CreateStore(Val, Variable);
+        return Val;
+    }
+    
     Value *L = LHS->codegen();
     Value *R = RHS->codegen();
     if (!L || !R) return nullptr;
@@ -963,6 +980,8 @@ int main()
     BinopPrecedence['*'] = 40;
     BinopPrecedence['/'] = 40; // this 
     BinopPrecedence['%'] = 40; // and that. i added them myself
+    BinopPrecedence['='] = 2;
+
 
     fprintf(stderr, "ready> ");
     getNextTOken();
