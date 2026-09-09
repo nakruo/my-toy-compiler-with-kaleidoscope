@@ -68,7 +68,9 @@ enum Token
     tok_in = -10,
 
     tok_unary = -11,
-    tok_binary = -12
+    tok_binary = -12,
+
+    tok_var = -13,
 };
 
 static std::string IdentifierStr;
@@ -92,6 +94,8 @@ static int gettok()
         
         if (IdentifierStr == "for") //
             return tok_for;
+        if (IdentifierStr == "var")
+            return tok_var;
         if (IdentifierStr == "in")
             return tok_in;
 
@@ -220,6 +224,19 @@ class UnaryExprAST : public ExprAST
 public:
     UnaryExprAST(char Opcode, std::unique_ptr<ExprAST> Operand)
         : Opcode(Opcode), Operand(std::move(Operand)) 
+    {}
+
+    Value *codegen() override;
+};
+
+class VarExprAST : public ExprAST
+{
+    std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> VarNames;
+    std::unique_ptr<ExprAST> Body;
+
+public:
+    VarExprAST(std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> VarNames, std::unique_ptr<ExprAST> Body)
+        : VarNames(std::move(VarNames)), Body(std::move(Body))
     {}
 
     Value *codegen() override;
@@ -555,6 +572,43 @@ Value *UnaryExprAST::codegen()
     return Builder->CreateCall(F, OperandV, "unop");
 }
 
+Value *VarExprAST::codegen()
+{
+    std::vector<AllocaInst *> OldBindings;
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+
+    for (unsigned i = 0, e = VarNames.size(); i != e; ++i)
+    {
+        const std::string &VarName = VarNames[i].first;
+        ExprAST *Init = VarNames[i].second.get();
+
+        Value *InitVal;
+        if (Init)
+        {
+            InitVal = Init->codegen();
+            if (!InitVal)
+                return nullptr;
+        } else
+        {
+            InitVal = ConstantFP::get(*TheContext, APFloat(0.0));
+        }
+        AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, VarName);
+        Builder->CreateStore(InitVal, Alloca);
+        OldBindings.push_back(NamedValues[VarName]);
+        
+        NamedValues[VarName] = Alloca;
+    }
+
+    Value *BodyVal = Body->codegen();
+    if (!BodyVal)
+        return nullptr;
+    
+    for (unsigned i = 0, e = VarNames.size(); i != e; ++i)
+        NamedValues[VarNames[i].first] = OldBindings[i];
+    
+    return BodyVal;
+}
+
 static int getNextTOken() 
 {
     return CurTok = gettok();
@@ -685,6 +739,48 @@ static std::unique_ptr<ExprAST> ParseForExpr()
     return std::make_unique<ForExprAST>(IdName, std::move(Start), std::move(End), std::move(Step), std::move(Body));
 }
 
+static std::unique_ptr<ExprAST> ParseVarExpr()
+{
+    getNextTOken();
+    std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> VarNames;
+
+    if (CurTok != tok_identifier)
+        return LogError("expected identifier after var");
+
+    while (true)
+    {
+        std::string Name = IdentifierStr;
+        getNextTOken();
+
+        std::unique_ptr<ExprAST> Init;
+        if (CurTok == '=')
+        {
+            getNextTOken();
+            Init = ParseExpression();
+            if (!Init) return nullptr;
+        }
+
+        VarNames.push_back(std::make_pair(Name, std::move(Init)));
+
+        if (CurTok != ',') break;
+        getNextTOken();
+
+        if (CurTok != tok_identifier)
+            return LogError("expected identifier list after var");
+
+    }
+    
+    if (CurTok != tok_in)
+        return LogError("expected 'in' keyword after 'var'");
+    getNextTOken();
+
+    auto Body = ParseExpression();
+    if (!Body)
+        return nullptr;
+        
+    return std::make_unique<VarExprAST>(std::move(VarNames), std::move(Body));
+}
+
 static std::unique_ptr<ExprAST> ParsePrimary() 
 {
     switch (CurTok)
@@ -695,6 +791,8 @@ static std::unique_ptr<ExprAST> ParsePrimary()
         return ParseIFExpr();
     case tok_for:
         return ParseForExpr();
+    case tok_var:
+        return ParseVarExpr();
     case tok_identifier:
         return ParseIdentifierExpr();
     case tok_number:
