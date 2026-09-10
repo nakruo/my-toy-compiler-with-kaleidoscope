@@ -36,6 +36,9 @@
 #include "llvm/TargetParser/Host.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/IR/LegacyPassManager.h"
 
 #ifdef _WIN32
 #define DLLEXPORT __declspec(dllexport)
@@ -964,8 +967,6 @@ static void HandleDefinition()
             FnIR->print(errs());
             fprintf(stderr, "\n");
 
-            ExitOnErr(TheJIT->addModule(ThreadSafeModule(std::move(TheModule), std::move(TheContext))));
-            InitializeModuleAndManagers();
         }
     }
     else 
@@ -998,18 +999,7 @@ static void HandleTopLevelExpression()
     {
       if (FnAST->codegen()) 
       {
-        auto RT = TheJIT->getMainJITDylib().createResourceTracker();
-        auto TSM = ThreadSafeModule(std::move(TheModule), std::move(TheContext));
-        ExitOnErr(TheJIT->addModule(std::move(TSM), RT));
-
-        InitializeModuleAndManagers();
-
-        auto ExprSymbol = ExitOnErr(TheJIT->lookup("__anon_expr"));
-
-        double (*FP)() = ExprSymbol.getAddress().toPtr<double (*)()>();
-        fprintf(stderr, "Evaluated to %f\n", FP());
-
-        ExitOnErr(RT->remove());
+        fprintf(stderr, "Parsed top-level expr\n");
       }
     }
     else
@@ -1024,7 +1014,7 @@ static void InitializeModuleAndManagers()
     TheModule = std::make_unique<Module>("my first JIT Module", *TheContext);
     Builder = std::make_unique<IRBuilder<>>(*TheContext);
 
-    TheModule->setDataLayout(TheJIT->getDataLayout()); 
+    //TheModule->setDataLayout(TheJIT->getDataLayout()); 
     TheFPM = std::make_unique<FunctionPassManager>();
     TheLAM = std::make_unique<LoopAnalysisManager>();
     TheFAM = std::make_unique<FunctionAnalysisManager>();
@@ -1076,6 +1066,15 @@ static void MainLoop()
 
 int main()
 {
+        
+    BinopPrecedence['<'] = 10;
+    BinopPrecedence['+'] = 20;
+    BinopPrecedence['-'] = 20;
+    BinopPrecedence['*'] = 40;
+    BinopPrecedence['/'] = 40;  
+    BinopPrecedence['%'] = 40; 
+    BinopPrecedence['='] = 2;
+
     InitializeNativeTarget();
     InitializeNativeTargetAsmParser();
     InitializeNativeTargetAsmPrinter();
@@ -1097,39 +1096,35 @@ int main()
     TargetOptions opt;
     auto TargetMachine = Target->createTargetMachine(TargetTriple, CPU, Features, opt, Reloc::PIC_);
 
+    InitializeModuleAndManagers();
+
     TheModule->setDataLayout(TargetMachine->createDataLayout());
     TheModule->setTargetTriple(TargetTriple);
-    
-    BinopPrecedence['<'] = 10;
-    BinopPrecedence['+'] = 20;
-    BinopPrecedence['-'] = 20;
-    BinopPrecedence['*'] = 40;
-    BinopPrecedence['/'] = 40;  
-    BinopPrecedence['%'] = 40; 
-    BinopPrecedence['='] = 2;
-
 
     fprintf(stderr, "ready> ");
     getNextTOken();
-
-    InitializeNativeTarget();
-    InitializeNativeTargetAsmPrinter();
-    InitializeNativeTargetAsmParser();
-    
-    auto JIT = KaleidoscopeJIT::Create();
-    if (!JIT) 
-    {
-        fprintf(stderr, "\nThe JIT engine could not be started\n\n");
-        exit(1);
-    }
-    TheJIT = std::move(*JIT);
-
-
-    InitializeModuleAndManagers();
-
     MainLoop();
 
-    TheModule->print(errs(), nullptr);
+    auto filename = "output.o";
+    std::error_code EC;
+    raw_fd_ostream dest(filename, EC, sys::fs::OF_None);
+
+    if (EC)
+    {
+        errs() << "Could not open file: " << EC.message();
+        return 1;
+    }
+    legacy::PassManager pass;
+    auto fileType = CodeGenFileType::ObjectFile;
+
+    if (TargetMachine->addPassesToEmitFile(pass, dest, nullptr, fileType))
+    {
+        errs() << "TargetMachine can't emit a file of this type";
+        return 1;
+    }
+
+    pass.run(*TheModule);
+    dest.flush();
 
     return 0;
 }
