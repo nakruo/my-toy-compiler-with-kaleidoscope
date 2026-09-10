@@ -35,6 +35,7 @@
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/TargetParser/Host.h"
 #include "llvm/MC/TargetRegistry.h"
+#include "llvm/Target/TargetMachine.h"
 
 #ifdef _WIN32
 #define DLLEXPORT __declspec(dllexport)
@@ -1078,7 +1079,7 @@ int main()
     InitializeNativeTarget();
     InitializeNativeTargetAsmParser();
     InitializeNativeTargetAsmPrinter();
-    
+
     auto TargetTriple = sys::getDefaultTargetTriple();
 
     std::string Error;
@@ -1089,6 +1090,15 @@ int main()
         errs() << Error;
         return 1;
     }
+
+    auto CPU = "generic";
+    auto Features = "";
+
+    TargetOptions opt;
+    auto TargetMachine = Target->createTargetMachine(TargetTriple, CPU, Features, opt, Reloc::PIC_);
+
+    TheModule->setDataLayout(TargetMachine->createDataLayout());
+    TheModule->setTargetTriple(TargetTriple);
     
     BinopPrecedence['<'] = 10;
     BinopPrecedence['+'] = 20;
