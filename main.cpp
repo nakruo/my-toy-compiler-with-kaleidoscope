@@ -32,6 +32,9 @@
 #include "llvm/Transforms/Scalar/Reassociate.h"
 #include "llvm/Transforms/Scalar/SimplifyCFG.h"
 #include "llvm/Transforms/Utils/Mem2Reg.h"
+#include "llvm/Support/TargetSelect.h"
+#include "llvm/TargetParser/Host.h"
+#include "llvm/MC/TargetRegistry.h"
 
 #ifdef _WIN32
 #define DLLEXPORT __declspec(dllexport)
@@ -1072,12 +1075,27 @@ static void MainLoop()
 
 int main()
 {
+    InitializeNativeTarget();
+    InitializeNativeTargetAsmParser();
+    InitializeNativeTargetAsmPrinter();
+    
+    auto TargetTriple = sys::getDefaultTargetTriple();
+
+    std::string Error;
+    auto Target = TargetRegistry::lookupTarget(TargetTriple, Error);
+
+    if (!Target)
+    {
+        errs() << Error;
+        return 1;
+    }
+    
     BinopPrecedence['<'] = 10;
     BinopPrecedence['+'] = 20;
     BinopPrecedence['-'] = 20;
     BinopPrecedence['*'] = 40;
-    BinopPrecedence['/'] = 40; // this 
-    BinopPrecedence['%'] = 40; // and that. i added them myself
+    BinopPrecedence['/'] = 40;  
+    BinopPrecedence['%'] = 40; 
     BinopPrecedence['='] = 2;
 
 
