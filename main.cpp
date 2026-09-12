@@ -84,16 +84,39 @@ enum Token
 static std::string IdentifierStr;
 static double NumVal;
 
+struct SourceLocation 
+{
+    int Line;
+    int Col;
+};
+static SourceLocation CurLoc;
+static SourceLocation LexLoc = {1, 0};
+
+static int advance()
+{
+    int LastChar = getchar();
+    if (LastChar == '\n' || LastChar == '\r')
+    {
+        LexLoc.Line++;
+        LexLoc.Col = 0;
+    } 
+    else
+    {
+        LexLoc.Col++;
+    }
+    return LastChar;
+}
+
 static int gettok()
 {
     static int LastChar = ' ';
 
-    while (isspace(LastChar)) LastChar = getchar();
+    while (isspace(LastChar)) LastChar = advance();
 
-    if (isalpha(LastChar)) //isalpha() checks if a character is an alphabetic letter. true: letter, false: other chr.
+    if (isalpha(LastChar))
     {
         IdentifierStr = LastChar;
-        while (isalnum((LastChar = getchar()))) IdentifierStr += LastChar;
+        while (isalnum((LastChar = advance()))) IdentifierStr += LastChar;
         
         if (IdentifierStr == "def")    /**/
             return tok_def;
@@ -128,7 +151,7 @@ static int gettok()
         std::string NumStr;
         do {
             NumStr += LastChar;
-            LastChar = getchar();
+            LastChar = advance();
         } while (isdigit(LastChar) || LastChar == '.');
     
         NumVal = strtod(NumStr.c_str(), 0);
@@ -137,7 +160,7 @@ static int gettok()
 
     if (LastChar == '#')
     {
-        do LastChar = getchar();
+        do LastChar = advance();
         while (LastChar != EOF && LastChar != '\n' && LastChar != '\r');
 
         if (LastChar != EOF) return gettok();
@@ -146,15 +169,25 @@ static int gettok()
     if (LastChar == EOF) return tok_eof;
 
     int ThisChar = LastChar;
-    LastChar = getchar();
+    LastChar = advance();
     return ThisChar;
 }
 
 class ExprAST 
 {
+    SourceLocation Loc;
 public:
+    ExprAST(SourceLocation Loc = CurLoc) : Loc(Loc) {}
     virtual ~ExprAST() = default;
     virtual Value *codegen() = 0;
+    int getLine() const 
+        {return Loc.Line;}
+    int getCol() const 
+        {return Loc.Col;}
+    virtual raw_ostream &dump(raw_ostream &out, int ind)
+    {
+        return out << ':' << getLine() << ':' << getCol() << '\n';
+    }
 };
 
 class NumberExprAST : public ExprAST 
@@ -314,8 +347,24 @@ struct DebugInfo
 {
     DICompileUnit *TheCU;
     DIType *DblTy;
+    std::vector<DIScope *> LexicalBlocks;
+
+    void emitLocation(ExprAST *AST);
     DIType *getDoubleTy();
 } KSDbgInfo;
+
+void DebugInfo::emitLocation(ExprAST *AST)
+{
+    if (!AST)
+        return Builder->SetCurrentDebugLocation(DebugLoc());
+    DIScope *Scope;
+    if (LexicalBlocks.empty())
+        Scope = TheCU;
+    else
+        Scope = LexicalBlocks.back();
+
+    Builder->SetCurrentDebugLocation(DILocation::get(Scope->getContext(), AST->getLine(), AST->getCol(), Scope));
+}
 
 DIType *DebugInfo::getDoubleTy()
 {
@@ -363,11 +412,13 @@ Function *getFunction(std::string Name)
 
 Value *NumberExprAST::codegen()
 {
+    KSDbgInfo.emitLocation(this);
     return ConstantFP::get(*TheContext, APFloat(Val));
 }
 
 Value *VariableExprAST::codegen()
 {
+    KSDbgInfo.emitLocation(this);
     AllocaInst *A = NamedValues[Name];
     if (!A) LogErrorV("Unknown variable name");
     return Builder->CreateLoad(A->getAllocatedType(), A, Name.c_str());
@@ -375,6 +426,7 @@ Value *VariableExprAST::codegen()
 
 Value *BinaryExprAST::codegen()
 {
+    KSDbgInfo.emitLocation(this);
     if (OP == '=')
     {
         VariableExprAST *LHSE = static_cast<VariableExprAST*>(LHS.get());
@@ -419,6 +471,7 @@ Value *BinaryExprAST::codegen()
 
 Value *CallExprAST::codegen()
 {
+    KSDbgInfo.emitLocation(this);
     Function *CalleeF = getFunction(Callee);
     if (!CalleeF)
         return LogErrorV("Unknown function referenced");
@@ -450,6 +503,18 @@ Function *PrototypeAST::codegen()
 
 }
 
+DISubroutineType *CreateFunctionType(unsigned NumArgs)
+{
+    SmallVector<Metadata *, 8> EltTys;
+    DIType *DblTy = KSDbgInfo.getDoubleTy();
+
+    EltTys.push_back(DblTy);
+    for (unsigned i = 0, e = NumArgs; i != e; ++i)
+        EltTys.push_back(DblTy);
+
+    return DBuilder->createSubroutineType(DBuilder->getOrCreateTypeArray(EltTys));
+}
+
 Function *FunctionAST::codegen()
 {
     auto &P = *Proto;
@@ -464,6 +529,17 @@ Function *FunctionAST::codegen()
 
     if (!TheFunction->empty())
         return (Function*)LogErrorV("Function cannot be redefined.");
+
+    DIFile *Unit = DBuilder->createFile(KSDbgInfo.TheCU->getFilename(), KSDbgInfo.TheCU->getDirectory());
+
+    DIScope *FContext = Unit;
+    unsigned LineNo = 0;
+    unsigned ScopeLine = 0;
+
+    DISubprogram *SP = DBuilder->createFunction(FContext, P.getName(), StringRef(), Unit, LineNo, CreateFunctionType(TheFunction->arg_size()), ScopeLine, DINode::FlagPrototyped, DISubprogram::SPFlagDefinition);
+    TheFunction->setSubprogram(SP);
+    KSDbgInfo.LexicalBlocks.push_back(SP);
+
 
     BasicBlock *BB = BasicBlock::Create(*TheContext, "entry", TheFunction);
     Builder->SetInsertPoint(BB);
@@ -481,15 +557,18 @@ Function *FunctionAST::codegen()
         Builder->CreateRet(RetVal);
         verifyFunction(*TheFunction);
         TheFPM->run(*TheFunction, *TheFAM);
+        KSDbgInfo.LexicalBlocks.pop_back();
         return TheFunction;
     }
 
     TheFunction->eraseFromParent();
+    KSDbgInfo.LexicalBlocks.pop_back();
     return nullptr;
 }
 
 Value *IFExprAST::codegen()
 {
+    KSDbgInfo.emitLocation(this);
     Value *CondV = Cond->codegen();
     if (!CondV)
         return nullptr;
@@ -531,6 +610,7 @@ Value *IFExprAST::codegen()
 
 Value *ForExprAST::codegen()
 {
+    KSDbgInfo.emitLocation(this);
     Value *StartVal = Start->codegen();
     if (!StartVal)  return nullptr;
 
@@ -586,6 +666,7 @@ Value *ForExprAST::codegen()
 
 Value *UnaryExprAST::codegen() 
 {
+    KSDbgInfo.emitLocation(this);
     Value *OperandV = Operand->codegen();
     if (!OperandV)
         return nullptr;
@@ -599,6 +680,7 @@ Value *UnaryExprAST::codegen()
 
 Value *VarExprAST::codegen()
 {
+    KSDbgInfo.emitLocation(this);
     std::vector<AllocaInst *> OldBindings;
     Function *TheFunction = Builder->GetInsertBlock()->getParent();
 
@@ -969,7 +1051,7 @@ static std::unique_ptr<FunctionAST> ParseTopLevelExpr()
 {
     if (auto e = ParseExpression())
     {
-        auto Proto = std::make_unique<PrototypeAST>(main, std::vector<std::string>());
+        auto Proto = std::make_unique<PrototypeAST>("main", std::vector<std::string>());
         return std::make_unique<FunctionAST>(std::move(Proto), std::move(e));
     }
     return nullptr;
