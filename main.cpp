@@ -39,6 +39,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/IR/LegacyPassManager.h"
+#include "llvm/IR/DIBuilder.h"
 
 #ifdef _WIN32
 #define DLLEXPORT __declspec(dllexport)
@@ -307,6 +308,23 @@ static std::unique_ptr<StandardInstrumentations> TheSI;
 static std::unique_ptr<KaleidoscopeJIT> TheJIT;
 static ExitOnError ExitOnErr;
 static void InitializeModuleAndManagers();
+static std::unique_ptr<DIBuilder> DBuilder;
+
+struct DebugInfo
+{
+    DICompileUnit *TheCU;
+    DIType *DblTy;
+    DIType *getDoubleTy();
+} KSDbgInfo;
+
+DIType *DebugInfo::getDoubleTy()
+{
+    if (DblTy)
+        return DblTy;
+
+    DblTy = DBuilder->createBasicType("double", 64, dwarf::DW_ATE_float);
+    return DblTy;
+}
 
 std::unique_ptr<ExprAST> LogError(const char *Str)
 {
@@ -951,7 +969,7 @@ static std::unique_ptr<FunctionAST> ParseTopLevelExpr()
 {
     if (auto e = ParseExpression())
     {
-        auto Proto = std::make_unique<PrototypeAST>("__anon_expr", std::vector<std::string>());
+        auto Proto = std::make_unique<PrototypeAST>(main, std::vector<std::string>());
         return std::make_unique<FunctionAST>(std::move(Proto), std::move(e));
     }
     return nullptr;
@@ -1012,6 +1030,7 @@ static void InitializeModuleAndManagers()
 {
     TheContext = std::make_unique<LLVMContext>();
     TheModule = std::make_unique<Module>("my first JIT Module", *TheContext);
+    DBuilder = std::make_unique<DIBuilder>(*TheModule); 
     Builder = std::make_unique<IRBuilder<>>(*TheContext);
 
     //TheModule->setDataLayout(TheJIT->getDataLayout()); 
@@ -1024,11 +1043,14 @@ static void InitializeModuleAndManagers()
     TheSI = std::make_unique<StandardInstrumentations>(*TheContext, true);
     TheSI->registerCallbacks(*ThePIC, TheMAM.get());
     
+    KSDbgInfo.TheCU = DBuilder->createCompileUnit(dwarf::DW_LANG_C, DBuilder->createFile("input.ks", ".."), "nakruo's Kaleidoscope Compiler", false, "", 0);
+
+    /* optimization passes
     TheFPM->addPass(PromotePass());
     TheFPM->addPass(InstCombinePass());
     TheFPM->addPass(ReassociatePass());
     TheFPM->addPass(GVNPass());
-    TheFPM->addPass(SimplifyCFGPass());
+    TheFPM->addPass(SimplifyCFGPass());*/
 
     PassBuilder PB;
     PB.registerModuleAnalyses(*TheMAM);
@@ -1040,7 +1062,6 @@ static void MainLoop()
 {
     while (true) 
     {
-        fprintf(stderr, "ready> ");
         switch (CurTok)
         {
             case tok_eof:
@@ -1101,7 +1122,6 @@ int main()
     TheModule->setDataLayout(TargetMachine->createDataLayout());
     TheModule->setTargetTriple(TargetTriple);
 
-    fprintf(stderr, "ready> ");
     getNextTOken();
     MainLoop();
 
@@ -1123,6 +1143,7 @@ int main()
         return 1;
     }
 
+    DBuilder->finalize();
     pass.run(*TheModule);
     dest.flush();
 
