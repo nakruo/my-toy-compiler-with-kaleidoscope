@@ -545,12 +545,19 @@ Function *FunctionAST::codegen()
     Builder->SetInsertPoint(BB);
 
     NamedValues.clear();
+    unsigned ArgIdx = 0;
     for (auto &Arg : TheFunction->args())
     {
         AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, Arg.getName());
+        DILocalVariable *D = DBuilder->createParameterVariable(SP, Arg.getName(), ++ArgIdx, Unit, LineNo, KSDbgInfo.getDoubleTy(), true);
+        DBuilder->insertDeclare(Alloca, D, DBuilder->createExpression(), DILocation::get(SP->getContext(), LineNo, 0, SP), Builder->GetInsertBlock());
+
         Builder->CreateStore(&Arg, Alloca);
         NamedValues[std::string(Arg.getName())] = Alloca;
     }
+
+    KSDbgInfo.emitLocation(nullptr);
+    KSDbgInfo.emitLocation(Body.get());
 
     if (Value *RetVal = Body->codegen())
     {
