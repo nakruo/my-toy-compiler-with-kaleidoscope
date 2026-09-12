@@ -1,25 +1,40 @@
 # Kaleidoscope Toy Compiler
 
-This is a personal project I'm working on to learn C++ and compiler design using the LLVM infrastructure. I'm following the official LLVM Kaleidoscope tutorial.
+This is a custom implementation of the LLVM Kaleidoscope compiler, written in C++ to explore compiler design, low-level system programming, and the LLVM backend architecture.
 
-### Current Status
-The compiler is currently capable of parsing code and generating optimized LLVM IR 
-Features include:
-* A basic Lexer and Recursive Descent Parser
-* An AST (Abstract Syntax Tree) builder
-* LLVM IR Code Generation (for functions, externs, and top-level expressions)
-* LLVM Optimization Passes (FunctionPassManager for constant folding, reassociation, and CFG simplification)
-* JIT Compilation and Execution (via ORC JIT)
-* Persistent Memory and External Symbol Resolution (C++ stdlib linkage)
-* Control Flow Support (if/then/else conditional expressions)
-* for loop iteration structures
+### Features Implemented
+* **Lexer & Parser**: Custom recursive descent parser building an Abstract Syntax Tree (AST).
+* **Control Flow**: `if/then/else` conditionals and `for` loop iterations.
+* **User-Defined Operators**: Support for custom unary and binary operators with adjustable precedence.
+* **Mutable Variables**: Local variables via `var/in` expressions and the assignment operator (`=`), utilizing stack memory allocation (`alloca`).
+* **AOT Compilation**: Emits native `.o` object files directly for the target machine, moving beyond interactive JIT execution.
+* **DWARF Debug Information**: Full debug metadata generation (source locations, scopes, variables) for seamless integration with standard debuggers like GDB/LLDB.
 
 ### How to build and run
-If you want to test the REPL and see the optimized LLVM IR output:
+The compiler is currently set up to read a source file named `input.ks` from the project root and output native machine code.
 
+1. **Build the compiler:**
 ```bash
-cd build
+mkdir build && cd build
 cmake ..
 make
+```
+
+2. **Write your Kaleidoscope Code:**
+Open the existing `input.ks` file located in the root directory of the project (alongside `main.cpp`). You can write your own top-level logic, or simply use the pre-written example code already provided inside the file to test the compiler immediately.
+
+3. **Compile to Object Code:** 
+Run the compiler from the 'build' directory. It will read 'input.ks' and generate an 'output.o' file.
+
+```bash
 ./kaleidoscope
 ```
+
+4. **Link and Execute:**
+Link the generated object file with a standard C++ driver to run your compiled program.
+
+```bash
+g++ ../test.cpp output.o -o test_app
+./test_app
+```
+
